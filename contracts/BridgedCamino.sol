@@ -164,11 +164,11 @@ contract BridgedCaminoV1 is
     }
 
     function burnFrom(
-        address account,
+        address from,
         uint256 amount
-    ) public virtual override whenNotPaused onlyRole(MINTER_ROLE) notBlacklisted(msg.sender) notBlacklisted(account) {
-        emit Burn(msg.sender, account, amount);
-        super.burnFrom(account, amount);
+    ) public virtual override whenNotPaused onlyRole(MINTER_ROLE) notBlacklisted(msg.sender) notBlacklisted(from) {
+        emit Burn(msg.sender, from, amount);
+        super.burnFrom(from, amount);
     }
 
     /***************************************************

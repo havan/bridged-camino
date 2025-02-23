@@ -15,6 +15,7 @@ describe("BridgedCaminoV1", function () {
             minter,
             blacklisterAdmin,
             blacklister,
+            otherAccount1,
         ] = await ethers.getSigners();
 
         // Deploy the BridgedCaminoV1 contract implementation
@@ -53,6 +54,7 @@ describe("BridgedCaminoV1", function () {
             minter,
             blacklisterAdmin,
             blacklister,
+            otherAccount1,
         };
     }
 
@@ -69,6 +71,7 @@ describe("BridgedCaminoV1", function () {
             minter,
             blacklisterAdmin,
             blacklister,
+            otherAccount1,
         } = await loadFixture(deployBridgedCaminoV1Fixture);
 
         const minterAllowedAmount = ethers.parseEther("1000");
@@ -90,6 +93,48 @@ describe("BridgedCaminoV1", function () {
             blacklisterAdmin,
             blacklister,
             minterAllowedAmount,
+            otherAccount1,
+        };
+    }
+
+    async function bridgedCaminoV1WithBlacklistFixture() {
+        const {
+            proxiedBridgedCaminoV1,
+            deployer,
+            defaultAdmin,
+            pauserAdmin,
+            pauser,
+            upgraderAdmin,
+            upgrader,
+            minterAdmin,
+            minter,
+            blacklisterAdmin,
+            blacklister,
+            minterAllowedAmount,
+            otherAccount1,
+        } = await loadFixture(bridgedCaminoV1WithMintersFixture);
+
+        await proxiedBridgedCaminoV1
+            .connect(defaultAdmin)
+            .grantRole(await proxiedBridgedCaminoV1.BLACKLISTER_ROLE_ADMIN(), blacklisterAdmin.address);
+        await proxiedBridgedCaminoV1
+            .connect(blacklisterAdmin)
+            .grantRole(await proxiedBridgedCaminoV1.BLACKLISTER_ROLE(), blacklister.address);
+
+        return {
+            proxiedBridgedCaminoV1,
+            deployer,
+            defaultAdmin,
+            pauserAdmin,
+            pauser,
+            upgraderAdmin,
+            upgrader,
+            minterAdmin,
+            minter,
+            blacklisterAdmin,
+            blacklister,
+            minterAllowedAmount,
+            otherAccount1,
         };
     }
 
@@ -341,6 +386,399 @@ describe("BridgedCaminoV1", function () {
             await expect(
                 proxiedBridgedCaminoV1.connect(minterAdmin).configureMinter(minter.address, minterAllowedAmount),
             ).to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "EnforcedPause");
+        });
+
+        it("Should remove minter correctly", async function () {
+            const { proxiedBridgedCaminoV1, minterAdmin, minter, minterAllowedAmount } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Minter role
+            const MINTER_ROLE = await proxiedBridgedCaminoV1.MINTER_ROLE();
+
+            // Check minter role & allowance
+            expect(await proxiedBridgedCaminoV1.hasRole(MINTER_ROLE, minter.address)).to.be.true;
+            expect(await proxiedBridgedCaminoV1.minterAllowance(minter.address)).to.equal(minterAllowedAmount);
+
+            // Mint with minter
+            const amount = minterAllowedAmount / 2n;
+            expect(await proxiedBridgedCaminoV1.connect(minter).mint(minter.address, amount)).to.not.reverted;
+
+            // Remove minter
+            const removeMinterTx = await proxiedBridgedCaminoV1.connect(minterAdmin).removeMinter(minter.address);
+            await expect(removeMinterTx).to.emit(proxiedBridgedCaminoV1, "MinterRemoved").withArgs(minter.address);
+            await expect(removeMinterTx)
+                .to.emit(proxiedBridgedCaminoV1, "RoleRevoked")
+                .withArgs(MINTER_ROLE, minter.address, minterAdmin.address);
+
+            // Check minter role & allowance
+            expect(await proxiedBridgedCaminoV1.hasRole(MINTER_ROLE, minter.address)).to.be.false;
+            expect(await proxiedBridgedCaminoV1.minterAllowance(minter.address)).to.equal(0n);
+
+            // Try to mint with minter
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(minter.address, amount))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(minter.address, MINTER_ROLE);
+        });
+
+        it("Should revert if remove minter if not minter admin", async function () {
+            const { proxiedBridgedCaminoV1, deployer, minter } = await loadFixture(bridgedCaminoV1WithMintersFixture);
+
+            // Minter admin role
+            const MINTER_ROLE_ADMIN = await proxiedBridgedCaminoV1.MINTER_ROLE_ADMIN();
+
+            // Try to remove minter
+            await expect(proxiedBridgedCaminoV1.connect(deployer).removeMinter(minter.address))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(deployer.address, MINTER_ROLE_ADMIN);
+
+            await expect(proxiedBridgedCaminoV1.connect(minter).removeMinter(minter.address))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(minter.address, MINTER_ROLE_ADMIN);
+        });
+    });
+
+    describe("Burn", function () {
+        it("Should burn correctly", async function () {
+            const { proxiedBridgedCaminoV1, minter, minterAllowedAmount } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Minter role
+            const MINTER_ROLE = await proxiedBridgedCaminoV1.MINTER_ROLE();
+
+            // Check minter role & allowance
+            expect(await proxiedBridgedCaminoV1.hasRole(MINTER_ROLE, minter.address)).to.be.true;
+            expect(await proxiedBridgedCaminoV1.minterAllowance(minter.address)).to.equal(minterAllowedAmount);
+
+            // Mint with minter
+            const amount = minterAllowedAmount / 2n;
+            expect(await proxiedBridgedCaminoV1.connect(minter).mint(minter.address, amount)).to.not.reverted;
+
+            // Try to burn
+            const burnTx = await proxiedBridgedCaminoV1.connect(minter).burn(1n);
+            await expect(burnTx)
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(minter.address, ethers.ZeroAddress, 1n);
+            await expect(burnTx).to.emit(proxiedBridgedCaminoV1, "Burn").withArgs(minter.address, minter.address, 1n);
+        });
+
+        it("Should revert if burn more than balance", async function () {
+            const { proxiedBridgedCaminoV1, minter, minterAllowedAmount } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Try to burn
+            await expect(proxiedBridgedCaminoV1.connect(minter).burn(1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "ERC20InsufficientBalance")
+                .withArgs(minter.address, 0n, 1n);
+
+            // Mint some
+            const mintAmount = minterAllowedAmount / 2n;
+            expect(await proxiedBridgedCaminoV1.connect(minter).mint(minter.address, mintAmount)).to.not.reverted;
+
+            // Try to burn
+            const burnAmount = mintAmount + 1n;
+            await expect(proxiedBridgedCaminoV1.connect(minter).burn(burnAmount))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "ERC20InsufficientBalance")
+                .withArgs(minter.address, mintAmount, burnAmount);
+        });
+
+        it("Should revert burn if not minter", async function () {
+            const { proxiedBridgedCaminoV1, deployer } = await loadFixture(bridgedCaminoV1WithMintersFixture);
+
+            // Try to burn
+            await expect(proxiedBridgedCaminoV1.connect(deployer).burn(1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(deployer.address, await proxiedBridgedCaminoV1.MINTER_ROLE());
+        });
+
+        it("Should revert burn when paused", async function () {
+            const { proxiedBridgedCaminoV1, pauser, minter, minterAllowedAmount } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Mint some tokens
+            const mintAmount = minterAllowedAmount / 2n;
+            expect(await proxiedBridgedCaminoV1.connect(minter).mint(minter.address, mintAmount)).to.not.reverted;
+
+            // Pause the contract
+            expect(await proxiedBridgedCaminoV1.connect(pauser).pause()).to.not.reverted;
+
+            // Try to burn
+            await expect(proxiedBridgedCaminoV1.connect(minter).burn(1n)).to.be.revertedWithCustomError(
+                proxiedBridgedCaminoV1,
+                "EnforcedPause",
+            );
+        });
+
+        it("Should burnFrom correctly", async function () {
+            const { proxiedBridgedCaminoV1, minter, minterAllowedAmount, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Minter role
+            const MINTER_ROLE = await proxiedBridgedCaminoV1.MINTER_ROLE();
+
+            // Check minter role & allowance
+            expect(await proxiedBridgedCaminoV1.hasRole(MINTER_ROLE, minter.address)).to.be.true;
+            expect(await proxiedBridgedCaminoV1.minterAllowance(minter.address)).to.equal(minterAllowedAmount);
+
+            // Mint with minter to otherAccount1
+            const amount = minterAllowedAmount / 2n;
+            expect(await proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, amount)).to.not.reverted;
+
+            // Try to burnFrom, should fail as minter doesn't have approval yet
+            await expect(proxiedBridgedCaminoV1.connect(minter).burnFrom(minter.address, amount))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "ERC20InsufficientAllowance")
+                .withArgs(minter.address, 0n, amount); // (spender, currentAllowance, amount)
+
+            // Approve minter with otherAccount1
+            const approveTx = await proxiedBridgedCaminoV1.connect(otherAccount1).approve(minter.address, amount);
+            await expect(approveTx)
+                .to.emit(proxiedBridgedCaminoV1, "Approval")
+                .withArgs(otherAccount1.address, minter.address, amount);
+
+            // Try to burnFrom otherAccount1 with minter
+            const burnFromTx = await proxiedBridgedCaminoV1.connect(minter).burnFrom(otherAccount1.address, amount);
+            await expect(burnFromTx)
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(otherAccount1.address, ethers.ZeroAddress, amount);
+            await expect(burnFromTx)
+                .to.emit(proxiedBridgedCaminoV1, "Burn")
+                .withArgs(minter.address, otherAccount1.address, amount);
+        });
+
+        it("Should revert burnFrom if not minter", async function () {
+            const { proxiedBridgedCaminoV1, minter, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Give some tokens to the otherAccount1
+            expect(await proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n)).to.not.reverted;
+
+            // Try to burnFrom
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).burnFrom(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(otherAccount1.address, await proxiedBridgedCaminoV1.MINTER_ROLE());
+        });
+
+        it("Should revert burnFrom when paused", async function () {
+            const { proxiedBridgedCaminoV1, pauser, minter, minterAllowedAmount, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithMintersFixture,
+            );
+
+            // Mint some tokens for otherAccount1
+            const mintAmount = minterAllowedAmount / 2n;
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, mintAmount)).to.not
+                .reverted;
+
+            // Approve minter with otherAccount1
+            const approveTx = await proxiedBridgedCaminoV1.connect(otherAccount1).approve(minter.address, mintAmount);
+            await expect(approveTx)
+                .to.emit(proxiedBridgedCaminoV1, "Approval")
+                .withArgs(otherAccount1.address, minter.address, mintAmount);
+
+            // Pause the contract
+            await expect(proxiedBridgedCaminoV1.connect(pauser).pause()).to.not.reverted;
+
+            // Try to burnFrom, should fail
+            await expect(
+                proxiedBridgedCaminoV1.connect(minter).burnFrom(otherAccount1.address, mintAmount),
+            ).to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "EnforcedPause");
+        });
+    });
+
+    describe("Pause", function () {
+        it("Should pause and unpause the contract", async function () {
+            const { proxiedBridgedCaminoV1, pauser, minter } = await loadFixture(bridgedCaminoV1WithMintersFixture);
+
+            // Pause the contract
+            expect(await proxiedBridgedCaminoV1.connect(pauser).pause())
+                .to.emit(proxiedBridgedCaminoV1, "Paused")
+                .withArgs(pauser.address);
+
+            // Try to mint, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(minter.address, 1n)).to.be.revertedWithCustomError(
+                proxiedBridgedCaminoV1,
+                "EnforcedPause",
+            );
+
+            // Unpause the contract
+            await expect(proxiedBridgedCaminoV1.connect(pauser).unpause())
+                .to.emit(proxiedBridgedCaminoV1, "Unpaused")
+                .withArgs(pauser.address);
+
+            // Try to mint, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(minter.address, 1n)).to.not.reverted;
+        });
+
+        it("Should revert pause/unpause if not pauser", async function () {
+            const { proxiedBridgedCaminoV1, minter } = await loadFixture(bridgedCaminoV1WithMintersFixture);
+
+            const PAUSER_ROLE = await proxiedBridgedCaminoV1.PAUSER_ROLE();
+
+            await expect(proxiedBridgedCaminoV1.connect(minter).pause())
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(minter.address, PAUSER_ROLE);
+
+            await expect(proxiedBridgedCaminoV1.connect(minter).unpause())
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(minter.address, PAUSER_ROLE);
+        });
+    });
+
+    describe("Blacklist", function () {
+        it("Should blacklist and unblacklist an account", async function () {
+            const { proxiedBridgedCaminoV1, defaultAdmin, blacklister, blacklisterAdmin, minter, otherAccount1 } =
+                await loadFixture(bridgedCaminoV1WithMintersFixture);
+
+            // Grant blacklister role
+            const BLACKLISTER_ROLE = await proxiedBridgedCaminoV1.BLACKLISTER_ROLE();
+            const BLACKLISTER_ROLE_ADMIN = await proxiedBridgedCaminoV1.BLACKLISTER_ROLE_ADMIN();
+
+            // Grant blacklister admin role
+            await expect(
+                await proxiedBridgedCaminoV1
+                    .connect(defaultAdmin)
+                    .grantRole(BLACKLISTER_ROLE_ADMIN, blacklisterAdmin.address),
+            )
+                .to.emit(proxiedBridgedCaminoV1, "RoleGranted")
+                .withArgs(BLACKLISTER_ROLE_ADMIN, blacklisterAdmin.address, defaultAdmin.address);
+
+            // Grant blacklister role
+            await expect(
+                await proxiedBridgedCaminoV1.connect(blacklisterAdmin).grantRole(BLACKLISTER_ROLE, blacklister.address),
+            )
+                .to.emit(proxiedBridgedCaminoV1, "RoleGranted")
+                .withArgs(BLACKLISTER_ROLE, blacklister.address, blacklisterAdmin.address);
+
+            // Blacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to mint, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // unBlacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to mint, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n)).to.not.reverted;
+        });
+
+        it("Should revert mint with blacklisted to and msg.sender", async function () {
+            const { proxiedBridgedCaminoV1, minter, blacklister, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithBlacklistFixture,
+            );
+
+            // Blacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to mint, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Unblacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to mint, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n)).to.not.reverted;
+
+            // Blacklist minter
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(minter.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(minter.address);
+
+            // Try to mint, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(minter.address);
+
+            // Unblacklist minter
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(minter.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(minter.address);
+
+            // Try to mint, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1n)).to.not.reverted;
+        });
+
+        it("Should revert burn with blacklisted msg.sender", async function () {
+            const { proxiedBridgedCaminoV1, minter, blacklister } = await loadFixture(
+                bridgedCaminoV1WithBlacklistFixture,
+            );
+
+            // Mint some tokens for the minter
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(minter.address, 1000n)).to.not.reverted;
+
+            // Blacklist minter
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(minter.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(minter.address);
+
+            // Try to burn, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).burn(1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(minter.address);
+
+            // Unblacklist minter
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(minter.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(minter.address);
+
+            // Try to burn, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(minter).burn(1n)).to.be.not.reverted;
+        });
+
+        it("Should revert burnFrom with blacklisted from and msg.sender", async function () {
+            const { proxiedBridgedCaminoV1, minter, blacklister, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithBlacklistFixture,
+            );
+
+            // Mint some tokens for the otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 1000n)).to.not.reverted;
+
+            // Approve minter to spend otherAccount1's tokens
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).approve(minter.address, 1000n)).to.not.reverted;
+
+            // Blacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to burnFrom, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).burnFrom(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Unblacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to burnFrom, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(minter).burnFrom(otherAccount1.address, 1n)).to.not.reverted;
+
+            // Blacklist minter
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(minter.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(minter.address);
+
+            // Try to burnFrom, should fail
+            await expect(proxiedBridgedCaminoV1.connect(minter).burnFrom(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(minter.address);
         });
     });
 });
