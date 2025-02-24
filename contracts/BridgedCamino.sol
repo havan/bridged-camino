@@ -129,12 +129,18 @@ contract BridgedCaminoV1 is
         _disableInitializers();
     }
 
-    function initialize(address defaultAdmin, address pauser, address upgrader) public initializer {
-        __ERC20_init("BridgedCamino", "WCAM");
+    function initialize(
+        string memory _name,
+        string memory _symbol,
+        address defaultAdmin,
+        address pauser,
+        address upgrader
+    ) public initializer {
+        __ERC20_init(_name, _symbol);
         __ERC20Burnable_init();
         __ERC20Pausable_init();
         __AccessControl_init();
-        __ERC20Permit_init("BridgedCamino");
+        __ERC20Permit_init(_name);
         __UUPSUpgradeable_init();
         __Blacklistable_init();
 

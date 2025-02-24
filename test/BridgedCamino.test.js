@@ -24,8 +24,13 @@ describe("BridgedCaminoV1", function () {
 
         const bridgedCaminoV1Impl = await BridgedCaminoV1.deploy();
 
+        const name = "BridgedCamino";
+        const symbol = "WCAM.c";
+
         // Encode the initialization data
         const initializeData = bridgedCaminoV1Impl.interface.encodeFunctionData("initialize", [
+            name,
+            symbol,
             defaultAdmin.address,
             pauser.address,
             upgrader.address,
@@ -57,6 +62,8 @@ describe("BridgedCaminoV1", function () {
             blacklister,
             otherAccount1,
             otherAccount2,
+            name,
+            symbol,
         };
     }
 
@@ -189,9 +196,9 @@ describe("BridgedCaminoV1", function () {
 
     describe("Deployment", function () {
         it("Should set the right name and symbol", async function () {
-            const { proxiedBridgedCaminoV1 } = await loadFixture(deployBridgedCaminoV1Fixture);
-            expect(await proxiedBridgedCaminoV1.name()).to.equal("BridgedCamino");
-            expect(await proxiedBridgedCaminoV1.symbol()).to.equal("WCAM");
+            const { proxiedBridgedCaminoV1, name, symbol } = await loadFixture(deployBridgedCaminoV1Fixture);
+            expect(await proxiedBridgedCaminoV1.name()).to.equal(name);
+            expect(await proxiedBridgedCaminoV1.symbol()).to.equal(symbol);
         });
 
         it("Should set the right decimals", async function () {
@@ -228,12 +235,25 @@ describe("BridgedCaminoV1", function () {
         });
 
         it("Should revert calling initialize twice", async function () {
-            const { proxiedBridgedCaminoV1, deployer, defaultAdmin, pauserAdmin, pauser, upgraderAdmin, upgrader } =
+            const { proxiedBridgedCaminoV1, defaultAdmin, pauser, upgrader, name, symbol } =
                 await loadFixture(deployBridgedCaminoV1Fixture);
 
             await expect(
-                proxiedBridgedCaminoV1.initialize(defaultAdmin.address, pauser.address, upgrader.address),
+                proxiedBridgedCaminoV1.initialize(name, symbol, defaultAdmin.address, pauser.address, upgrader.address),
             ).to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "InvalidInitialization");
+        });
+
+        it("Check eip712Domain", async function () {
+            const { proxiedBridgedCaminoV1, name, symbol } = await loadFixture(deployBridgedCaminoV1Fixture);
+            const eip712Domain = await proxiedBridgedCaminoV1.eip712Domain();
+
+            expect(eip712Domain.fields).to.equal("0x0f");
+            expect(eip712Domain.name).to.equal(name);
+            expect(eip712Domain.version).to.equal("1");
+            expect(eip712Domain.chainId).to.equal(await getChainId());
+            expect(eip712Domain.verifyingContract).to.equal(await proxiedBridgedCaminoV1.getAddress());
+            expect(eip712Domain.salt).to.equal("0x0000000000000000000000000000000000000000000000000000000000000000");
+            expect(eip712Domain.extensions).to.deep.equal([]);
         });
     });
 
