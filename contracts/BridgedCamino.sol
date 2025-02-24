@@ -11,6 +11,10 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { BlacklistableUpgradeable } from "./BlacklistableUpgradeable.sol";
 
+/**
+ * @title BridgedCamino
+ * @notice A pausable, upgradable and permit-enabled ERC20 token with minting and burning capabilities.
+ */
 contract BridgedCaminoV1 is
     Initializable,
     ERC20Upgradeable,
@@ -21,13 +25,34 @@ contract BridgedCaminoV1 is
     BlacklistableUpgradeable,
     UUPSUpgradeable
 {
+    /**
+     * @dev PAUSER_ROLE is a role that allows a user to pause and unpause the contract
+     */
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
+    /**
+     * @dev PAUSER_ROLE_ADMIN is the role that can grant and revoke the PAUSER_ROLE
+     */
     bytes32 public constant PAUSER_ROLE_ADMIN = keccak256("PAUSER_ROLE_ADMIN");
 
+    /**
+     * @dev MINTER_ROLE is a role that allows a user to mint tokens
+     */
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+
+    /**
+     * @dev MINTER_ROLE_ADMIN is the role that can grant and revoke the MINTER_ROLE
+     */
     bytes32 public constant MINTER_ROLE_ADMIN = keccak256("MINTER_ROLE_ADMIN");
 
+    /**
+     * @dev UPGRADER_ROLE is a role that allows a user to upgrade the contract
+     */
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    /**
+     * @dev UPGRADER_ROLE_ADMIN is the role that can grant and revoke the UPGRADER_ROLE
+     */
     bytes32 public constant UPGRADER_ROLE_ADMIN = keccak256("UPGRADER_ROLE_ADMIN");
 
     /***************************************************
@@ -54,18 +79,45 @@ contract BridgedCaminoV1 is
      *                    EVENTS                       *
      ***************************************************/
 
+    /**
+     * @notice Emitted when a minter mints `amount` tokens to `to`
+     * @param minter The address of the minter
+     * @param to The address of the recipient
+     * @param amount The amount of tokens minted
+     */
     event Mint(address indexed minter, address indexed to, uint256 amount);
 
+    /**
+     * @notice Emitted when a minter burns `amount` tokens from `from`
+     * @param minter The address of the minter
+     * @param from The address of the burner
+     * @param amount The amount of tokens burned
+     */
     event Burn(address indexed minter, address indexed from, uint256 amount);
 
+    /**
+     * @notice Emitted when a minter is configured
+     * @param minter The address of the minter
+     * @param allowance The allowance of the minter
+     * @param newMinter Whether the minter is new or not
+     */
     event MinterConfigured(address indexed minter, uint256 allowance, bool newMinter);
 
+    /**
+     * @notice Emitted when a minter is removed
+     * @param minter The address of the minter
+     */
     event MinterRemoved(address indexed minter);
 
     /***************************************************
      *                    ERRORS                       *
      ***************************************************/
 
+    /**
+     * @notice Thrown when the mint amount exceeds the minter's allowance
+     * @param _minter The address of the minter
+     * @param _amount The amount attempted to mint
+     */
     error AmountExceedsMintAllowance(address _minter, uint256 _amount);
 
     /***************************************************
@@ -99,6 +151,12 @@ contract BridgedCaminoV1 is
      *                     MINT                        *
      ***************************************************/
 
+    /**
+     * @notice Mint `amount` tokens to `to` using the minter's allowance
+     * @dev Only `MINTER_ROLE` can call this function
+     * @param to The address of the recipient
+     * @param amount The amount of tokens to mint
+     */
     function mint(address to, uint256 amount) external virtual whenNotPaused onlyRole(MINTER_ROLE) {
         BridgedCaminoV1Storage storage $ = _getBridgedCaminoV1Storage();
 
@@ -115,11 +173,22 @@ contract BridgedCaminoV1 is
         _mint(to, amount);
     }
 
+    /**
+     * @notice Get the mint allowance of the `minter`
+     * @param minter The address of the minter
+     * @return amount The allowance of the minter
+     */
     function minterAllowance(address minter) external view virtual returns (uint256 amount) {
         BridgedCaminoV1Storage storage $ = _getBridgedCaminoV1Storage();
         return $.minterAllowed[minter];
     }
 
+    /**
+     * @notice Configure a `minter` with an initial allowance of `minterAllowedAmount`
+     * @dev Only `MINTER_ROLE_ADMIN` can call this function
+     * @param minter The address of the minter
+     * @param minterAllowedAmount The initial allowance of the minter
+     */
     function configureMinter(
         address minter,
         uint256 minterAllowedAmount
@@ -136,6 +205,11 @@ contract BridgedCaminoV1 is
         emit MinterConfigured(minter, minterAllowedAmount, granted);
     }
 
+    /**
+     * @notice Revoke the minter role from `minter` and remove its allowance
+     * @dev Only `MINTER_ROLE_ADMIN` can call this function
+     * @param minter The address of the minter
+     */
     function removeMinter(address minter) external virtual onlyRole(MINTER_ROLE_ADMIN) {
         BridgedCaminoV1Storage storage $ = _getBridgedCaminoV1Storage();
 
@@ -153,11 +227,22 @@ contract BridgedCaminoV1 is
      *                     BURN                        *
      ***************************************************/
 
+    /**
+     * @notice Burns `amount` tokens from the caller.
+     * @dev Only `MINTER_ROLE` can call this function
+     * @param amount The amount of tokens to burn.
+     */
     function burn(uint256 amount) public virtual override whenNotPaused onlyRole(MINTER_ROLE) {
         emit Burn(msg.sender, msg.sender, amount);
         super.burn(amount);
     }
 
+    /**
+     * @notice Burns `amount` tokens from `from`.
+     * @dev Only `MINTER_ROLE` can call this function
+     * @param from The address from which to burn tokens.
+     * @param amount The amount of tokens to burn.
+     */
     function burnFrom(address from, uint256 amount) public virtual override whenNotPaused onlyRole(MINTER_ROLE) {
         emit Burn(msg.sender, from, amount);
         super.burnFrom(from, amount);
@@ -167,10 +252,18 @@ contract BridgedCaminoV1 is
      *                    PAUSER                       *
      ***************************************************/
 
+    /**
+     * @notice Pauses the contract
+     * @dev Only `PAUSER_ROLE` can call this function
+     */
     function pause() public virtual onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
+    /**
+     * @notice Unpauses the contract
+     * @dev Only `PAUSER_ROLE` can call this function
+     */
     function unpause() public virtual onlyRole(PAUSER_ROLE) {
         _unpause();
     }
@@ -179,12 +272,25 @@ contract BridgedCaminoV1 is
      *                  UPGRADE AUTH                   *
      ***************************************************/
 
+    /**
+     * @notice Authorizes the upgrade
+     * @dev Only `UPGRADER_ROLE` can call this function
+     * @param newImplementation The address of the new implementation
+     */
     function _authorizeUpgrade(address newImplementation) internal virtual override onlyRole(UPGRADER_ROLE) {}
 
     /***************************************************
      *                 BLACKLIST AUTH                  *
      ***************************************************/
 
+    /**
+     * @notice Approves a spender to spend the specified value of tokens on behalf of the owner
+     * @dev This function checks that the owner, spender, and caller are not blacklisted
+     * @param owner The address of the token owner
+     * @param spender The address of the spender
+     * @param value The amount of tokens to approve
+     * @param emitEvent A flag indicating whether to emit the Approval event
+     */
     function _approve(
         address owner,
         address spender,
@@ -201,6 +307,13 @@ contract BridgedCaminoV1 is
         super._approve(owner, spender, value, emitEvent);
     }
 
+    /**
+     * @notice Updates the token balances of `from` and `to` after a transfer
+     * @dev This function checks that `from`, `to`, and the caller are not blacklisted
+     * @param from The address of the sender
+     * @param to The address of the recipient
+     * @param value The amount of tokens to transfer
+     */
     function _update(
         address from,
         address to,
