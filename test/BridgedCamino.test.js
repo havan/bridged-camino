@@ -16,6 +16,7 @@ describe("BridgedCaminoV1", function () {
             blacklisterAdmin,
             blacklister,
             otherAccount1,
+            otherAccount2,
         ] = await ethers.getSigners();
 
         // Deploy the BridgedCaminoV1 contract implementation
@@ -55,6 +56,7 @@ describe("BridgedCaminoV1", function () {
             blacklisterAdmin,
             blacklister,
             otherAccount1,
+            otherAccount2,
         };
     }
 
@@ -72,6 +74,7 @@ describe("BridgedCaminoV1", function () {
             blacklisterAdmin,
             blacklister,
             otherAccount1,
+            otherAccount2,
         } = await loadFixture(deployBridgedCaminoV1Fixture);
 
         const minterAllowedAmount = ethers.parseEther("1000");
@@ -94,6 +97,7 @@ describe("BridgedCaminoV1", function () {
             blacklister,
             minterAllowedAmount,
             otherAccount1,
+            otherAccount2,
         };
     }
 
@@ -112,6 +116,7 @@ describe("BridgedCaminoV1", function () {
             blacklister,
             minterAllowedAmount,
             otherAccount1,
+            otherAccount2,
         } = await loadFixture(bridgedCaminoV1WithMintersFixture);
 
         await proxiedBridgedCaminoV1
@@ -135,6 +140,7 @@ describe("BridgedCaminoV1", function () {
             blacklister,
             minterAllowedAmount,
             otherAccount1,
+            otherAccount2,
         };
     }
 
@@ -219,6 +225,61 @@ describe("BridgedCaminoV1", function () {
 
             expect(await proxiedBridgedCaminoV1.hasRole(UPGRADER_ROLE, upgrader.address)).to.equal(true);
             expect(await proxiedBridgedCaminoV1.getRoleAdmin(UPGRADER_ROLE)).to.equal(UPGRADER_ROLE_ADMIN);
+        });
+
+        it("Should revert calling initialize twice", async function () {
+            const { proxiedBridgedCaminoV1, deployer, defaultAdmin, pauserAdmin, pauser, upgraderAdmin, upgrader } =
+                await loadFixture(deployBridgedCaminoV1Fixture);
+
+            await expect(
+                proxiedBridgedCaminoV1.initialize(defaultAdmin.address, pauser.address, upgrader.address),
+            ).to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "InvalidInitialization");
+        });
+    });
+
+    describe("Upgrade", function () {
+        it("Should upgrade", async function () {
+            const { proxiedBridgedCaminoV1, deployer, defaultAdmin, upgrader, upgraderAdmin } =
+                await loadFixture(deployBridgedCaminoV1Fixture);
+
+            // Create new implementation
+            const BridgedCaminoUpgradeTest = await ethers.getContractFactory("BridgedCaminoUpgradeTest");
+
+            // Deploy new implementation
+            const bridgedCaminoUpgradeTest = await BridgedCaminoUpgradeTest.deploy();
+
+            // Implementation address
+            const newImplementationAddress = await bridgedCaminoUpgradeTest.getAddress();
+
+            // Upgrade
+            await expect(proxiedBridgedCaminoV1.connect(upgrader).upgradeToAndCall(newImplementationAddress, "0x"))
+                .to.emit(proxiedBridgedCaminoV1, "Upgraded")
+                .withArgs(newImplementationAddress);
+
+            // Attach the new ABI to the proxy
+            const upgradedProxiedBridgedCamino = BridgedCaminoUpgradeTest.attach(
+                await proxiedBridgedCaminoV1.getAddress(),
+            );
+
+            // Check new implementation
+            expect(await upgradedProxiedBridgedCamino.getTestResult()).to.equal("Success");
+        });
+
+        it("Should revert calling upgradeToAndCall from non-upgrader", async function () {
+            const { proxiedBridgedCaminoV1, deployer, defaultAdmin, upgrader, upgraderAdmin } =
+                await loadFixture(deployBridgedCaminoV1Fixture);
+
+            // Upgrader role
+            const UPGRADER_ROLE = await proxiedBridgedCaminoV1.UPGRADER_ROLE();
+
+            // Call upgradeToAndCall from non-upgrader
+            await expect(
+                proxiedBridgedCaminoV1
+                    .connect(defaultAdmin)
+                    .upgradeToAndCall(await proxiedBridgedCaminoV1.getAddress(), "0x"),
+            )
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(defaultAdmin.address, UPGRADER_ROLE);
         });
     });
 
@@ -779,6 +840,208 @@ describe("BridgedCaminoV1", function () {
             await expect(proxiedBridgedCaminoV1.connect(minter).burnFrom(otherAccount1.address, 1n))
                 .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
                 .withArgs(minter.address);
+        });
+
+        it("Should revert blacklist/unblacklist with non-blacklister", async function () {
+            const { proxiedBridgedCaminoV1, minter, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithBlacklistFixture,
+            );
+
+            // Blacklister role
+            const BLACKLISTER_ROLE = await proxiedBridgedCaminoV1.BLACKLISTER_ROLE();
+
+            // Try to blacklist, should fail
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).blacklist(otherAccount1.address))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(otherAccount1.address, BLACKLISTER_ROLE);
+
+            // Try to unblacklist, should fail
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).unBlacklist(otherAccount1.address))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccessControlUnauthorizedAccount")
+                .withArgs(otherAccount1.address, BLACKLISTER_ROLE);
+        });
+
+        it("Should get blacklisted accounts correctly", async function () {
+            const { proxiedBridgedCaminoV1, minter, blacklister, otherAccount1 } = await loadFixture(
+                bridgedCaminoV1WithBlacklistFixture,
+            );
+
+            // Check otherAccount1 is not blacklisted
+            expect(await proxiedBridgedCaminoV1.isBlacklisted(otherAccount1.address)).to.be.false;
+
+            // Blacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Check otherAccount1 is blacklisted
+            expect(await proxiedBridgedCaminoV1.isBlacklisted(otherAccount1.address)).to.be.true;
+
+            // Unblacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Check otherAccount1 is not blacklisted
+            expect(await proxiedBridgedCaminoV1.isBlacklisted(otherAccount1.address)).to.be.false;
+        });
+
+        it("Should revert transfer with blacklisted from/to", async function () {
+            const { proxiedBridgedCaminoV1, minter, blacklister, otherAccount1, otherAccount2 } = await loadFixture(
+                bridgedCaminoV1WithBlacklistFixture,
+            );
+
+            // Mint some tokens for otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 2000n)).to.not.reverted;
+
+            // Try to transfer from otherAccount1 to otherAccount2, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).transfer(otherAccount2.address, 1000n))
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(otherAccount1.address, otherAccount2.address, 1000n);
+
+            // Blacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to transfer from otherAccount1 to otherAccount2, should fail
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).transfer(otherAccount2.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to transfer from otherAccount2 to otherAccount1, should fail too
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount2).transfer(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Unblacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to transfer from otherAccount1 to otherAccount2, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).transfer(otherAccount2.address, 1n))
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(otherAccount1.address, otherAccount2.address, 1n);
+
+            // Try to transfer from otherAccount2 to otherAccount1, should succeed
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount2).transfer(otherAccount1.address, 1n))
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(otherAccount2.address, otherAccount1.address, 1n);
+
+            // Blacklist otherAccount2
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount2.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount2.address);
+
+            // Try to transfer from otherAccount1 to otherAccount2, should fail
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).transfer(otherAccount2.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount2.address);
+
+            // Try to transfer from otherAccount2 to otherAccount1, should fail too
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount2).transfer(otherAccount1.address, 1n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount2.address);
+        });
+
+        it("Should revert transferFrom with blacklisted from/to/spender", async function () {
+            const { proxiedBridgedCaminoV1, deployer, minter, blacklister, otherAccount1, otherAccount2 } =
+                await loadFixture(bridgedCaminoV1WithBlacklistFixture);
+
+            // Mint some tokens for otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(minter).mint(otherAccount1.address, 2000n)).to.not.reverted;
+
+            // Approve otherAccount2 as spender
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).approve(otherAccount2.address, 1000n))
+                .to.emit(proxiedBridgedCaminoV1, "Approval")
+                .withArgs(otherAccount1.address, otherAccount2.address, 1000n);
+
+            // Check allowance
+            const allowance = await proxiedBridgedCaminoV1.allowance(otherAccount1.address, otherAccount2.address);
+            expect(allowance).to.equal(1000n);
+
+            // Blacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to transferFrom from otherAccount1 to otherAccount2 with otherAccount2 as spender, should fail
+            await expect(
+                proxiedBridgedCaminoV1
+                    .connect(otherAccount2)
+                    .transferFrom(otherAccount1.address, otherAccount2.address, 1n),
+            )
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to approve otherAccount2 as spender with otherAccount1 as from, should fail
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).approve(otherAccount2.address, 1500n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to approve otherAccount1 as spender with otherAccount2 as from, should fail
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount2).approve(otherAccount1.address, 1500n))
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Unblacklist otherAccount1
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).unBlacklist(otherAccount1.address))
+                .to.emit(proxiedBridgedCaminoV1, "UnBlacklisted")
+                .withArgs(otherAccount1.address);
+
+            // Try to transferFrom from otherAccount1 to otherAccount2 with otherAccount2 as spender, should succeed
+            await expect(
+                proxiedBridgedCaminoV1
+                    .connect(otherAccount2)
+                    .transferFrom(otherAccount1.address, otherAccount2.address, 1n),
+            )
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(otherAccount1.address, otherAccount2.address, 1n);
+
+            // Check allowance
+            const allowance2 = await proxiedBridgedCaminoV1.allowance(otherAccount1.address, otherAccount2.address);
+            expect(allowance2).to.equal(allowance - 1n);
+
+            // Approve otherAccount2 as spender with otherAccount1 as from and value of uint256.max
+            const UINT256MAX = 2n ** 256n - 1n;
+            await expect(proxiedBridgedCaminoV1.connect(otherAccount1).approve(otherAccount2.address, UINT256MAX))
+                .to.emit(proxiedBridgedCaminoV1, "Approval")
+                .withArgs(otherAccount1.address, otherAccount2.address, UINT256MAX);
+
+            // Check allowance
+            const allowanceMax = await proxiedBridgedCaminoV1.allowance(otherAccount1.address, otherAccount2.address);
+            expect(allowanceMax).to.equal(UINT256MAX);
+
+            // Try to transferFrom from otherAccount1 to otherAccount2 with otherAccount2 as spender, should succeed
+            await expect(
+                proxiedBridgedCaminoV1
+                    .connect(otherAccount2)
+                    .transferFrom(otherAccount1.address, otherAccount2.address, 30n),
+            )
+                .to.emit(proxiedBridgedCaminoV1, "Transfer")
+                .withArgs(otherAccount1.address, otherAccount2.address, 30n);
+
+            // Check allowance, should not change
+            const newAllowanceMax = await proxiedBridgedCaminoV1.allowance(
+                otherAccount1.address,
+                otherAccount2.address,
+            );
+            expect(newAllowanceMax).to.equal(UINT256MAX);
+
+            // Blacklist otherAccount2
+            await expect(proxiedBridgedCaminoV1.connect(blacklister).blacklist(otherAccount2.address))
+                .to.emit(proxiedBridgedCaminoV1, "Blacklisted")
+                .withArgs(otherAccount2.address);
+
+            // Try to transferFrom from otherAccount1 to deployer (another account) with otherAccount2 as spender, should fail
+            await expect(
+                proxiedBridgedCaminoV1
+                    .connect(otherAccount2)
+                    .transferFrom(otherAccount1.address, deployer.address, 30n),
+            )
+                .to.be.revertedWithCustomError(proxiedBridgedCaminoV1, "AccountIsBlacklisted")
+                .withArgs(otherAccount2.address);
         });
     });
 });

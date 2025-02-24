@@ -99,10 +99,7 @@ contract BridgedCaminoV1 is
      *                     MINT                        *
      ***************************************************/
 
-    function mint(
-        address to,
-        uint256 amount
-    ) external virtual whenNotPaused onlyRole(MINTER_ROLE) notBlacklisted(to) notBlacklisted(msg.sender) {
+    function mint(address to, uint256 amount) external virtual whenNotPaused onlyRole(MINTER_ROLE) {
         BridgedCaminoV1Storage storage $ = _getBridgedCaminoV1Storage();
 
         uint256 minterAllowedAmount = $.minterAllowed[msg.sender];
@@ -156,17 +153,12 @@ contract BridgedCaminoV1 is
      *                     BURN                        *
      ***************************************************/
 
-    function burn(
-        uint256 amount
-    ) public virtual override whenNotPaused onlyRole(MINTER_ROLE) notBlacklisted(msg.sender) {
+    function burn(uint256 amount) public virtual override whenNotPaused onlyRole(MINTER_ROLE) {
         emit Burn(msg.sender, msg.sender, amount);
         super.burn(amount);
     }
 
-    function burnFrom(
-        address from,
-        uint256 amount
-    ) public virtual override whenNotPaused onlyRole(MINTER_ROLE) notBlacklisted(msg.sender) notBlacklisted(from) {
+    function burnFrom(address from, uint256 amount) public virtual override whenNotPaused onlyRole(MINTER_ROLE) {
         emit Burn(msg.sender, from, amount);
         super.burnFrom(from, amount);
     }
@@ -183,15 +175,44 @@ contract BridgedCaminoV1 is
         _unpause();
     }
 
+    /***************************************************
+     *                  UPGRADE AUTH                   *
+     ***************************************************/
+
     function _authorizeUpgrade(address newImplementation) internal virtual override onlyRole(UPGRADER_ROLE) {}
 
-    // The following functions are overrides required by Solidity.
+    /***************************************************
+     *                 BLACKLIST AUTH                  *
+     ***************************************************/
+
+    function _approve(
+        address owner,
+        address spender,
+        uint256 value,
+        bool emitEvent
+    )
+        internal
+        virtual
+        override(ERC20Upgradeable)
+        notBlacklisted(owner)
+        notBlacklisted(spender)
+        notBlacklisted(msg.sender)
+    {
+        super._approve(owner, spender, value, emitEvent);
+    }
 
     function _update(
         address from,
         address to,
         uint256 value
-    ) internal virtual override(ERC20Upgradeable, ERC20PausableUpgradeable) {
+    )
+        internal
+        virtual
+        override(ERC20Upgradeable, ERC20PausableUpgradeable)
+        notBlacklisted(from)
+        notBlacklisted(to)
+        notBlacklisted(msg.sender)
+    {
         super._update(from, to, value);
     }
 }
