@@ -246,7 +246,7 @@ constructor() public
 ### initialize
 
 ```solidity
-function initialize(address defaultAdmin, address pauser, address upgrader) public
+function initialize(string _name, string _symbol, address defaultAdmin, address pauser, address upgrader) public
 ```
 
 ### mint
