@@ -32,6 +32,10 @@ module.exports = {
             url: vars.get("CAMINO_URL", "https://api.camino.network/ext/bc/C/rpc"),
             accounts: vars.has("CAMINO_DEPLOYER_PRIVATE_KEY") ? [vars.get("CAMINO_DEPLOYER_PRIVATE_KEY")] : [],
         },
+        amoy: {
+            url: vars.get("AMOY_URL", "https://rpc-amoy.polygon.technology"),
+            accounts: vars.has("AMOY_DEPLOYER_PRIVATE_KEY") ? [vars.get("AMOY_DEPLOYER_PRIVATE_KEY")] : [],
+        },
     },
     etherscan: {
         apiKey: {
