@@ -62,8 +62,11 @@ jobs:
               run: |
                   # Check if docgen generated docs that are uncommitted
                   if [ -n "$(git status --porcelain)" ]; then
-                    echo "Generated docs are not up to date. Please run yarn docgen and commit the changes."
+                    echo "❌ Generated docs are not up to date. Please run yarn docgen and commit the changes."
+                    git status --porcelain
                     exit 1
+                  else
+                    echo "✅ Generated docs are up to date."
                   fi
 
     coverage:
