@@ -40,6 +40,32 @@ jobs:
             - name: Run Tests
               run: yarn test
 
+    docs:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install dependencies
+              run: yarn install --frozen-lockfile
+
+            - name: Generate docs
+              run: yarn docgen
+
+            - name: Check if docs are up to date
+              run: |
+                  # Check if docgen generated docs that are uncommitted
+                  if [ -n "$(git status --porcelain)" ]; then
+                    echo "Generated docs are not up to date. Please run yarn docgen and commit the changes."
+                    exit 1
+                  fi
+
     coverage:
         runs-on: ubuntu-latest
 
